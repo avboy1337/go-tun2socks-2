@@ -15,7 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"unsafe"
-	//"tun2socks/common/log"
+	//"github.com/ponyChang/go-tun2socks-ios/common/log"
 	syncex "github.com/anubis8023/go-tun2socks/component/go-syncex"
 )
 
