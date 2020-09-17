@@ -36,6 +36,7 @@
 #define NO_SYS 1
 #define LWIP_TIMERS 1
 
+#define IP_DEFAULT_TTL 64
 #define LWIP_ARP 0
 #define ARP_QUEUEING 0
 #define IP_FORWARD 0
@@ -61,26 +62,31 @@
 #define LWIP_IPV6_MLD 0
 #define LWIP_IPV6_AUTOCONFIG 1
 
-#define MEMP_NUM_TCP_PCB_LISTEN 5
-#define MEMP_NUM_TCP_PCB 1024
-#define MEMP_NUM_UDP_PCB 512
+// disable checksum checks
+#define CHECKSUM_CHECK_IP 0
+#define CHECKSUM_CHECK_UDP 0
+#define CHECKSUM_CHECK_TCP 0
+#define CHECKSUM_CHECK_ICMP 0
+#define CHECKSUM_CHECK_ICMP6 0
 
-#define PBUF_POOL_SIZE 128
+#define LWIP_CHECKSUM_ON_COPY 1
+
+#define MEMP_NUM_TCP_PCB_LISTEN 1
+#define MEMP_NUM_TCP_PCB 16
+#define MEMP_NUM_UDP_PCB 1
+
+/*
+#define TCP_LISTEN_BACKLOG 1
+#define TCP_DEFAULT_LISTEN_BACKLOG 0xff
+#define LWIP_TCP_TIMESTAMPS 1
+*/
 
 #define TCP_MSS 1460
-#define TCP_SND_BUF                     (44 * TCP_MSS)
+#define TCP_WND 32 * 1024
+#define TCP_SND_BUF (TCP_WND)
 
-#define MEMP_NUM_TCP_SEG                TCP_SND_QUEUELEN
-
-#define LWIP_TCP_SACK_OUT 1
-#define LWIP_TCP_KEEPALIVE 1
-
-#define LWIP_WND_SCALE                  1
-#define TCP_RCV_SCALE                   2
-
-#define MEM_LIBC_MALLOC 0
-#define MEMP_MEM_MALLOC 0
-#define MEM_ALIGNMENT 4
+#define MEM_LIBC_MALLOC 1
+#define MEMP_MEM_MALLOC 1
 #define MEM_SIZE 128 * 1024
 
 #define SYS_LIGHTWEIGHT_PROT 0
@@ -90,93 +96,22 @@
 // is used regardless of the platform
 #define IPV6_FRAG_COPYHEADER 1
 
-// whether we are in debug mode
-// modify any golang (*.go) file to take effect
-#define TUN2SOCKS_DEBUG 0
-
-#if TUN2SOCKS_DEBUG
-
-#undef LWIP_NOASSERT
-#define LWIP_DEBUG 1
-
-#define LWIP_DBG_MIN_LEVEL              LWIP_DBG_LEVEL_ALL
-#define LWIP_DBG_TYPES_ON               LWIP_DBG_ON
-#define ETHARP_DEBUG                    LWIP_DBG_ON
-#define NETIF_DEBUG                     LWIP_DBG_OFF
-#define PBUF_DEBUG                      LWIP_DBG_ON
-#define ICMP_DEBUG                      LWIP_DBG_ON
-#define IGMP_DEBUG                      LWIP_DBG_ON
-#define INET_DEBUG                      LWIP_DBG_ON
-#define IP_DEBUG                        LWIP_DBG_ON
-#define IP_REASS_DEBUG                  LWIP_DBG_ON
-#define RAW_DEBUG                       LWIP_DBG_ON
-#define MEM_DEBUG                       LWIP_DBG_ON
-#define MEMP_DEBUG                      LWIP_DBG_ON
-#define SYS_DEBUG                       LWIP_DBG_ON
-#define TIMERS_DEBUG                    LWIP_DBG_OFF
-#define TCP_DEBUG                       LWIP_DBG_ON
-#define TCP_INPUT_DEBUG                 LWIP_DBG_ON
-#define TCP_FR_DEBUG                    LWIP_DBG_ON
-#define TCP_RTO_DEBUG                   LWIP_DBG_ON
-#define TCP_CWND_DEBUG                  LWIP_DBG_ON
-#define TCP_WND_DEBUG                   LWIP_DBG_ON
-#define TCP_OUTPUT_DEBUG                LWIP_DBG_ON
-#define TCP_RST_DEBUG                   LWIP_DBG_ON
-#define TCP_QLEN_DEBUG                  LWIP_DBG_ON
-#define UDP_DEBUG                       LWIP_DBG_ON
-#define TCPIP_DEBUG                     LWIP_DBG_OFF
-#define SLIP_DEBUG                      LWIP_DBG_OFF
-#define DHCP_DEBUG                      LWIP_DBG_OFF
-#define AUTOIP_DEBUG                    LWIP_DBG_OFF
-#define ACD_DEBUG                       LWIP_DBG_ON
-#define DNS_DEBUG                       LWIP_DBG_ON
-#define IP6_DEBUG                       LWIP_DBG_ON
-#define DHCP6_DEBUG                     LWIP_DBG_ON
-
-#else // TUN2SOCKS_DEBUG
-
-#undef LWIP_NOASSERT
 #define LWIP_DEBUG 0
-
-#define LWIP_DBG_MIN_LEVEL              LWIP_DBG_LEVEL_WARNING
-#define LWIP_DBG_TYPES_ON               LWIP_DBG_OFF
-#define ETHARP_DEBUG                    LWIP_DBG_OFF
-#define NETIF_DEBUG                     LWIP_DBG_OFF
-#define PBUF_DEBUG                      LWIP_DBG_ON
-#define ICMP_DEBUG                      LWIP_DBG_OFF
-#define IGMP_DEBUG                      LWIP_DBG_OFF
-#define INET_DEBUG                      LWIP_DBG_OFF
-#define IP_DEBUG                        LWIP_DBG_OFF
-#define IP_REASS_DEBUG                  LWIP_DBG_OFF
-#define RAW_DEBUG                       LWIP_DBG_OFF
-#define MEM_DEBUG                       LWIP_DBG_ON
-#define MEMP_DEBUG                      LWIP_DBG_ON
-#define SYS_DEBUG                       LWIP_DBG_OFF
-#define TIMERS_DEBUG                    LWIP_DBG_OFF
-#define TCP_DEBUG                       LWIP_DBG_OFF
-#define TCP_INPUT_DEBUG                 LWIP_DBG_OFF
-#define TCP_FR_DEBUG                    LWIP_DBG_OFF
-#define TCP_RTO_DEBUG                   LWIP_DBG_OFF
-#define TCP_CWND_DEBUG                  LWIP_DBG_OFF
-#define TCP_WND_DEBUG                   LWIP_DBG_OFF
-#define TCP_OUTPUT_DEBUG                LWIP_DBG_OFF
-#define TCP_RST_DEBUG                   LWIP_DBG_OFF
-#define TCP_QLEN_DEBUG                  LWIP_DBG_OFF
-#define UDP_DEBUG                       LWIP_DBG_OFF
-#define TCPIP_DEBUG                     LWIP_DBG_OFF
-#define SLIP_DEBUG                      LWIP_DBG_OFF
-#define DHCP_DEBUG                      LWIP_DBG_OFF
-#define AUTOIP_DEBUG                    LWIP_DBG_OFF
-#define ACD_DEBUG                       LWIP_DBG_OFF
-#define DNS_DEBUG                       LWIP_DBG_OFF
-#define IP6_DEBUG                       LWIP_DBG_OFF
-#define DHCP6_DEBUG                     LWIP_DBG_OFF
-
-#endif // TUN2SOCKS_DEBUG
-
+#define LWIP_DBG_TYPES_ON LWIP_DBG_OFF
+#define INET_DEBUG LWIP_DBG_ON
+#define IP_DEBUG LWIP_DBG_ON
+#define RAW_DEBUG LWIP_DBG_ON
+#define SYS_DEBUG LWIP_DBG_ON
+#define NETIF_DEBUG LWIP_DBG_ON
+#define TCP_DEBUG LWIP_DBG_ON
+#define UDP_DEBUG LWIP_DBG_ON
+#define TCP_INPUT_DEBUG LWIP_DBG_ON
+#define TCP_OUTPUT_DEBUG LWIP_DBG_ON
+#define TCPIP_DEBUG LWIP_DBG_ON
+#define IP6_DEBUG LWIP_DBG_ON
 
 #define LWIP_STATS 0
 #define LWIP_STATS_DISPLAY 0
 #define LWIP_PERF 0
 
-#endif // LWIP_CUSTOM_LWIPOPTS_H
+#endif

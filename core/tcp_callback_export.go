@@ -1,17 +1,14 @@
 package core
 
 /*
-#cgo CFLAGS: -I./c/custom -I./c/include
+#cgo CFLAGS: -I./c/include
 #include "lwip/tcp.h"
 */
 import "C"
 import (
 	"errors"
 	"fmt"
-	"log"
 	"unsafe"
-
-	"github.com/anubis8023/go-tun2socks/component/pool"
 )
 
 // These exported callback functions must be placed in a seperated file.
@@ -45,34 +42,24 @@ func tcpAcceptFn(arg unsafe.Pointer, newpcb *C.struct_tcp_pcb, err C.err_t) C.er
 }
 
 //export tcpRecvFn
-func tcpRecvFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, p *C.struct_pbuf, passedInErr C.err_t) C.err_t {
-	// Only free the pbuf when returning ERR_OK or ERR_ABRT,
-	// otherwise must not free the pbuf.
-	lwipMutex.Lock()
-	defer lwipMutex.Unlock()
-	shouldFreePbuf := false
-	defer func(pb *C.struct_pbuf, shouldFreePbuf *bool) {
-		lwipMutex.Lock()
-		defer lwipMutex.Unlock()
-		if pb != nil && *shouldFreePbuf {
-			C.pbuf_free(pb)
-			pb = nil
-		}
-	}(p, &shouldFreePbuf)
-
-	if passedInErr != C.ERR_OK && passedInErr != C.ERR_ABRT {
-		// TODO: unknown err passed in, not sure if it's correct
-		log.Printf("tcpRecvFn passed in err: %v , begin abort", int(passedInErr))
-		C.tcp_abort(tpcb)
-		shouldFreePbuf = true
-		return C.ERR_ABRT
+func tcpRecvFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, p *C.struct_pbuf, err C.err_t) C.err_t {
+	if err != C.ERR_OK && err != C.ERR_ABRT {
+		return err
 	}
 
-	conn, ok := GoPointerRestore(arg)
+	// Only free the pbuf when returning ERR_OK or ERR_ABRT,
+	// otherwise must not free the pbuf.
+	shouldFreePbuf := true
+	defer func() {
+		if p != nil && shouldFreePbuf {
+			C.pbuf_free(p)
+		}
+	}()
+
+	conn, ok := tcpConns.Load(getConnKeyVal(arg))
 	if !ok {
 		// The connection does not exists.
 		C.tcp_abort(tpcb)
-		shouldFreePbuf = true
 		return C.ERR_ABRT
 	}
 
@@ -81,10 +68,8 @@ func tcpRecvFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, p *C.struct_pbuf, pas
 		err := conn.(TCPConn).LocalClosed()
 		switch err.(*lwipError).Code {
 		case LWIP_ERR_ABRT:
-			shouldFreePbuf = true
 			return C.ERR_ABRT
 		case LWIP_ERR_OK:
-			shouldFreePbuf = true
 			return C.ERR_OK
 		default:
 			panic("unexpected error")
@@ -96,8 +81,8 @@ func tcpRecvFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, p *C.struct_pbuf, pas
 	if p.tot_len == p.len {
 		buf = (*[1 << 30]byte)(unsafe.Pointer(p.payload))[:totlen:totlen]
 	} else {
-		buf = pool.NewBytes(totlen)
-		defer pool.FreeBytes(buf)
+		buf = NewBytes(totlen)
+		defer FreeBytes(buf)
 		C.pbuf_copy_partial(p, unsafe.Pointer(&buf[0]), p.tot_len, 0)
 	}
 
@@ -105,32 +90,31 @@ func tcpRecvFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, p *C.struct_pbuf, pas
 	if rerr != nil {
 		switch rerr.(*lwipError).Code {
 		case LWIP_ERR_ABRT:
-			shouldFreePbuf = true
 			return C.ERR_ABRT
 		case LWIP_ERR_OK:
-			shouldFreePbuf = true
 			return C.ERR_OK
 		case LWIP_ERR_CONN:
+			shouldFreePbuf = false
 			// Tell lwip we can't receive data at the moment,
 			// lwip will store it and try again later.
 			return C.ERR_CONN
 		case LWIP_ERR_CLSD:
 			// lwip won't handle ERR_CLSD error for us, manually
 			// shuts down the rx side.
+			C.tcp_recved(tpcb, p.tot_len)
 			C.tcp_shutdown(tpcb, 1, 0)
-			return C.ERR_CLSD
+			return C.ERR_OK
 		default:
 			panic("unexpected error")
 		}
 	}
 
-	shouldFreePbuf = true
 	return C.ERR_OK
 }
 
 //export tcpSentFn
 func tcpSentFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, len C.u16_t) C.err_t {
-	if conn, ok := GoPointerRestore(arg); ok {
+	if conn, ok := tcpConns.Load(getConnKeyVal(arg)); ok {
 		err := conn.(TCPConn).Sent(uint16(len))
 		switch err.(*lwipError).Code {
 		case LWIP_ERR_ABRT:
@@ -141,8 +125,6 @@ func tcpSentFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, len C.u16_t) C.err_t 
 			panic("unexpected error")
 		}
 	} else {
-		lwipMutex.Lock()
-		defer lwipMutex.Unlock()
 		C.tcp_abort(tpcb)
 		return C.ERR_ABRT
 	}
@@ -150,7 +132,7 @@ func tcpSentFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb, len C.u16_t) C.err_t 
 
 //export tcpErrFn
 func tcpErrFn(arg unsafe.Pointer, err C.err_t) {
-	if conn, ok := GoPointerRestore(arg); ok {
+	if conn, ok := tcpConns.Load(getConnKeyVal(arg)); ok {
 		switch err {
 		case C.ERR_ABRT:
 			// Aborted through tcp_abort or by a TCP timer
@@ -166,7 +148,7 @@ func tcpErrFn(arg unsafe.Pointer, err C.err_t) {
 
 //export tcpPollFn
 func tcpPollFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb) C.err_t {
-	if conn, ok := GoPointerRestore(arg); ok {
+	if conn, ok := tcpConns.Load(getConnKeyVal(arg)); ok {
 		err := conn.(TCPConn).Poll()
 		switch err.(*lwipError).Code {
 		case LWIP_ERR_ABRT:
@@ -177,8 +159,6 @@ func tcpPollFn(arg unsafe.Pointer, tpcb *C.struct_tcp_pcb) C.err_t {
 			panic("unexpected error")
 		}
 	} else {
-		lwipMutex.Lock()
-		defer lwipMutex.Unlock()
 		C.tcp_abort(tpcb)
 		return C.ERR_ABRT
 	}

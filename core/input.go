@@ -1,7 +1,7 @@
 package core
 
 /*
-#cgo CFLAGS: -I./c/custom -I./c/include
+#cgo CFLAGS: -I./c/include
 #include "lwip/pbuf.h"
 #include "lwip/tcp.h"
 
@@ -21,16 +21,16 @@ import (
 type ipver byte
 
 const (
-	ipv4 = 4
-	ipv6 = 6
+	ipv4 ipver = 4
+	ipv6 ipver = 6
 )
 
 type proto byte
 
 const (
-	proto_icmp = 1
-	proto_tcp  = 6
-	proto_udp  = 17
+	proto_icmp proto = 1
+	proto_tcp  proto = 6
+	proto_udp  proto = 17
 )
 
 func peekIPVer(p []byte) (ipver, error) {
@@ -84,59 +84,44 @@ func peekNextProto(ipv ipver, p []byte) (proto, error) {
 	}
 }
 
-func Input(pkt []byte) (int, error) {
-	lwipMutex.Lock()
-	defer lwipMutex.Unlock()
-	pktLen := len(pkt)
-	if pktLen == 0 {
+func input(pkt []byte) (int, error) {
+	if len(pkt) == 0 {
 		return 0, nil
 	}
-	remaining := pktLen
-	startPos := 0
-	singleCopyLen := 0
+
+	ipv, err := peekIPVer(pkt)
+	if err != nil {
+		return 0, err
+	}
+
+	nextProto, err := peekNextProto(ipv, pkt)
+	if err != nil {
+		return 0, err
+	}
+
+	lwipMutex.Lock()
+	defer lwipMutex.Unlock()
 
 	var buf *C.struct_pbuf
-	var ierr C.err_t
 
-	// TODO Copy the data only when lwip need to keep it, e.g. in
-	// case we are returning ERR_CONN in tcpRecvFn.
-	//
-	// XXX: always copy since the address might got moved to other location during GC
-
-	// PBUF_POOL  pbuf payload refers to RAM. This one comes from a pool and should be used for RX.
-	// Payload can be chained (scatter-gather RX) but like PBUF_RAM, struct pbuf and its payload are allocated in one piece of contiguous memory
-	// (so the first payload byte can be calculated from struct pbuf). Don't use this for TX, if the pool becomes empty e.g. because of TCP queuing,
-	// you are unable to receive TCP acks!
-
-	buf = C.pbuf_alloc(C.PBUF_RAW, C.u16_t(pktLen), C.PBUF_POOL)
-	defer func(pb *C.struct_pbuf, err *C.err_t) {
-		if pb != nil && *err != C.ERR_OK {
-			lwipMutex.Lock()
-			defer lwipMutex.Unlock()
-			C.pbuf_free(pb)
-			pb = nil
-		}
-	}(buf, &ierr)
-	if buf == nil {
-		return 0, errors.New("lwip Input() pbuf_alloc returns NULL")
-	}
-	for remaining > 0 {
-		if remaining > int(buf.tot_len) {
-			singleCopyLen = int(buf.tot_len)
-		} else {
-			singleCopyLen = remaining
-		}
-		r := C.pbuf_take_at(buf, unsafe.Pointer(&pkt[startPos]), C.u16_t(singleCopyLen), C.u16_t(startPos))
-		if r == C.ERR_MEM {
-			panic("Input pbuf_take_at this should not happen")
-		}
-		startPos += singleCopyLen
-		remaining -= singleCopyLen
+	if nextProto == proto_udp && !(moreFrags(ipv, pkt) || fragOffset(ipv, pkt) > 0) {
+		// Copying data is not necessary for unfragmented UDP packets, and we would like to
+		// have all data in one pbuf.
+		buf = C.pbuf_alloc_reference(unsafe.Pointer(&pkt[0]), C.u16_t(len(pkt)), C.PBUF_REF)
+	} else {
+		// TODO Copy the data only when lwip need to keep it, e.g. in
+		// case we are returning ERR_CONN in tcpRecvFn.
+		//
+		// Allocating from PBUF_POOL results in a pbuf chain that may
+		// contain multiple pbufs.
+		buf = C.pbuf_alloc(C.PBUF_RAW, C.u16_t(len(pkt)), C.PBUF_POOL)
+		C.pbuf_take(buf, unsafe.Pointer(&pkt[0]), C.u16_t(len(pkt)))
 	}
 
-	ierr = C.input(buf)
+	ierr := C.input(buf)
 	if ierr != C.ERR_OK {
+		C.pbuf_free(buf)
 		return 0, errors.New("packet not handled")
 	}
-	return pktLen, nil
+	return len(pkt), nil
 }
