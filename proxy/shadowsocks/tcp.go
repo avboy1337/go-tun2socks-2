@@ -6,10 +6,7 @@ import (
 	"io"
 	"net"
 	"strconv"
-
-	//sscore "github.com/riobard/go-shadowsocks2/core"
-	//sssocks "github.com/riobard/go-shadowsocks2/socks"
-
+	
 	sscore "github.com/shadowsocks/go-shadowsocks2/core"
 	sssocks "github.com/shadowsocks/go-shadowsocks2/socks"
 
